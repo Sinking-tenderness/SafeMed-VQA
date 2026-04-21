@@ -1,0 +1,26 @@
+seed: 42
+dataset:
+  dataset_root: data/raw/vqa-rad
+  annotations_file: null
+  images_dir: null
+  val_ratio: 0.1
+  max_samples: null
+teacher:
+  model: Qwen/Qwen3-VL-235B-A22B-Instruct
+  temperature: 0.2
+  max_tokens: 800
+  max_retries: 3
+augmentation:
+  per_sample_variants: 4
+  mismatch_probability: 0.25
+  severity_weights:
+    low: 0.25
+    medium: 0.5
+    high: 0.25
+output:
+  train_index: data/interim/train_index.jsonl
+  val_index: data/interim/val_index.jsonl
+  test_index: data/interim/test_index.jsonl
+  teacher_train_jsonl: data/processed/train_safemed_pro.jsonl
+  datagen_error_log: outputs/logs/datagen_errors.jsonl
+  augmented_root: data/processed/augmented_images

@@ -1,0 +1,13 @@
+seed: 42
+model:
+  final_checkpoint: checkpoints/dpo
+  fallback_checkpoint: checkpoints/sft
+data:
+  val_index: data/interim/val_index.jsonl
+  test_index: data/interim/test_index.jsonl
+output:
+  val_predictions: outputs/predictions/val_predictions.jsonl
+  test_predictions: outputs/predictions/test_predictions.jsonl
+  calibration_report: outputs/reports/calibration.json
+  metrics_report: outputs/reports/eval_metrics.json
+  figures_dir: outputs/figures

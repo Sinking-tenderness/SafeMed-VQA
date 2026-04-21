@@ -1,0 +1,17 @@
+seed: 42
+model:
+  model_name: Qwen/Qwen3-VL-8B
+  sft_checkpoint: checkpoints/sft
+  output_dir: checkpoints/dpo
+training:
+  num_train_epochs: 1
+  learning_rate: 5.0e-6
+  beta: 0.1
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 8
+  max_prompt_length: 1024
+  max_completion_length: 768
+  logging_steps: 10
+data:
+  train_pairs_jsonl: data/dpo_pairs/dpo_pairs.jsonl
+  stress_source_jsonl: data/stress_test/stress_test.jsonl

@@ -1,0 +1,15 @@
+python-dotenv>=1.0.1
+PyYAML>=6.0.2
+requests>=2.32.3
+tqdm>=4.66.5
+Pillow>=10.4.0
+numpy>=1.26.4
+matplotlib>=3.9.2
+scikit-learn>=1.5.2
+datasets>=3.1.0
+transformers>=4.48.0
+accelerate>=1.1.1
+peft>=0.13.2
+trl>=0.13.0
+wandb>=0.18.7
+safetensors>=0.4.5
