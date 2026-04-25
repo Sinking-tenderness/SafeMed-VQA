@@ -21,8 +21,6 @@ STRESS_DEGRADATIONS = [
     "local_occlusion",
     "center_mask",
     "border_truncate",
-    "question_replacement",
-    "cross_sample_mismatch",
 ]
 
 
@@ -41,8 +39,9 @@ def prepare_stress_samples(
     seed: int,
 ) -> list[dict[str, Any]]:
     if stress_source_path.exists():
-        return read_jsonl(stress_source_path)
-    base_records = read_jsonl(fallback_index_path)
+        source_records = read_jsonl(stress_source_path)
+        return [record for record in source_records if str(record.get("split", "")).lower() != "test"]
+    base_records = [record for record in read_jsonl(fallback_index_path) if str(record.get("split", "")).lower() != "test"]
     rng = random.Random(seed)
     synthetic: list[dict[str, Any]] = []
     for sample in base_records:
@@ -50,7 +49,6 @@ def prepare_stress_samples(
         synthetic.append(
             create_augmented_sample(
                 sample=sample,
-                pool=base_records,
                 output_dir=augmented_root,
                 severity="high",
                 degradation_type=degradation,

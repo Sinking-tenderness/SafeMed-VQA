@@ -1,10 +1,11 @@
 seed: 42
 model:
-  model_name: Qwen/Qwen3-VL-8B
+  model_name: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
   torch_dtype: bfloat16
   use_flash_attention_2: false
+
 training:
-  output_dir: checkpoints/sft
+  output_dir: checkpoints/sft_qwen3vl8b_v1
   num_train_epochs: 2
   per_device_train_batch_size: 1
   per_device_eval_batch_size: 1
@@ -13,14 +14,14 @@ training:
   weight_decay: 0.01
   warmup_ratio: 0.03
   logging_steps: 10
-  save_steps: 100
-  eval_steps: 100
+  save_steps: 500
+  eval_steps: 500
   save_total_limit: 2
-  max_seq_length: 1536
+  max_seq_length: 4096
   gradient_checkpointing: true
   bf16: true
-  report_to:
-    - wandb
+  report_to: []
+
 lora:
   r: 16
   lora_alpha: 32
@@ -34,6 +35,7 @@ lora:
     - gate_proj
     - up_proj
     - down_proj
+
 data:
   train_jsonl: data/processed/train_safemed_pro.jsonl
   eval_ratio: 0.05

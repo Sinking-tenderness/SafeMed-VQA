@@ -1,9 +1,13 @@
 from __future__ import annotations
-
+import sys
 import argparse
 from pathlib import Path
 
 import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.dataset_utils import ROOT, read_jsonl
 from src.model_utils import (
