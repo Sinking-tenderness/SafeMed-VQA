@@ -171,7 +171,7 @@ if not SILICONFLOW_API_KEY:
 - `explanation`: 字符串，必须先做证据审查，再给出推理依据
 - `raw_confidence`: 0 到 1 的浮点数
 - `decision`: `answer` 或 `abstain`
-- `abstain_type`: `none | visual_insufficiency | region_missing | question_mismatch | high_risk_uncertainty`
+- `abstain_type`: `none | visual_insufficiency | region_missing | high_risk_uncertainty`
 - `risk_level`: `low | medium | high`
 - `answer`: 若 `decision=abstain`，必须输出与 explanation 一致的拒答说明
 
@@ -198,8 +198,7 @@ if not SILICONFLOW_API_KEY:
 1. 正常样本（原始图像 + 原始问题）
 2. 视觉退化样本
 3. 关键区域缺失样本
-4. 图问不匹配样本
-5. 高风险不确定样本
+4. 高风险不确定样本
 
 ### 7.3 允许的增强方式
 
@@ -217,13 +216,7 @@ if not SILICONFLOW_API_KEY:
 - 中心区域屏蔽
 - 边界截断
 
-#### C. 图问不匹配
-
-- 图像替换
-- 问题替换
-- 跨样本错配
-
-#### D. 高风险不确定
+#### C. 高风险不确定
 
 - 轻中度证据不足
 - 不一定强制拒答，由 Teacher 判定
@@ -475,7 +468,6 @@ Codex 必须按以下顺序实现和运行：
 
 - blur/noise/resize/contrast augmentation
 - crop/occlusion/masking augmentation
-- mismatch sample construction
 - 记录增强元数据
 
 ### `src/prompt_templates.py`

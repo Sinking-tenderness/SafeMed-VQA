@@ -26,7 +26,10 @@ def ensure_dir(path: str | Path) -> Path:
 
 
 def read_json(path: str | Path) -> Any:
-    with Path(path).open("r", encoding="utf-8") as handle:
+    source = Path(path)
+    if source.suffix.lower() == ".jsonl":
+        return read_jsonl(source)
+    with source.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -53,6 +56,13 @@ def write_jsonl(path: str | Path, records: Iterable[dict[str, Any]]) -> None:
     with target.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def append_jsonl(path: str | Path, record: dict[str, Any]) -> None:
+    target = Path(path)
+    ensure_dir(target.parent)
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def resolve_vqa_rad_paths(
@@ -208,19 +218,42 @@ def assign_splits(
     val_ratio: float = 0.0,
     seed: int = 42,
 ) -> dict[str, list[dict[str, Any]]]:
-    explicit = [record for record in records if _normalize_split(record.get("split"))]
-    if explicit and len(explicit) == len(records):
-        train = [record for record in records if _normalize_split(record.get("split")) == "train"]
-        val = [record for record in records if _normalize_split(record.get("split")) == "val"]
-        test = [record for record in records if _normalize_split(record.get("split")) == "test"]
+    normalized_pairs = [(record, _normalize_split(record.get("split"))) for record in records]
+    explicit_test = [record for record, split in normalized_pairs if split == "test"]
+    if explicit_test:
+        train_pool = [record for record, split in normalized_pairs if split != "test"]
+        shuffled_train = train_pool[:]
+        random.Random(seed).shuffle(shuffled_train)
+        if val_ratio > 0.0 and len(shuffled_train) > 1:
+            val_size = int(round(len(shuffled_train) * val_ratio))
+            val_size = max(1, min(val_size, len(shuffled_train) - 1))
+        else:
+            val_size = 0
+        val = shuffled_train[:val_size]
+        train = shuffled_train[val_size:]
+        test = explicit_test[:]
+        for record in train:
+            record["split"] = "train"
+        for record in val:
+            record["split"] = "val"
+        for record in test:
+            record["split"] = "test"
         return {"train": train, "val": val, "test": test}
 
     shuffled = records[:]
     random.Random(seed).shuffle(shuffled)
-    test_size = max(1, int(round(len(shuffled) * 0.2)))
+    if len(shuffled) < 5:
+        test_size = 0
+    else:
+        test_size = max(1, int(round(len(shuffled) * 0.2)))
     test = shuffled[:test_size]
     remaining = shuffled[test_size:]
-    val_size = int(round(len(remaining) * max(val_ratio, 0.0)))
+    if not remaining and test:
+        remaining.append(test.pop())
+    if len(remaining) < 5:
+        val_size = 0
+    else:
+        val_size = int(round(len(remaining) * max(val_ratio, 0.0)))
     val = remaining[:val_size]
     train = remaining[val_size:]
     for record in train:

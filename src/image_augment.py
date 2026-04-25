@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-
 
 def load_image(path: str | Path) -> Image.Image:
     return Image.open(path).convert("RGB")
@@ -134,55 +132,45 @@ def apply_degradation(
     raise ValueError(f"Unsupported degradation_type: {degradation_type}")
 
 
-def construct_mismatch_sample(
-    sample: dict[str, Any],
-    pool: list[dict[str, Any]],
-    rng: random.Random,
-) -> dict[str, Any]:
-    mismatch_type = rng.choice(["question_replacement", "image_replacement", "cross_sample_mismatch"])
-    other = sample
-    while other["sample_id"] == sample["sample_id"]:
-        other = rng.choice(pool)
-    mismatched = dict(sample)
-    if mismatch_type == "question_replacement":
-        mismatched["question"] = other["question"]
-    elif mismatch_type == "image_replacement":
-        mismatched["image_path"] = other["image_path"]
-    else:
-        mismatched["question"] = other["question"]
-        third = other
-        while third["sample_id"] in {sample["sample_id"], other["sample_id"]}:
-            third = rng.choice(pool)
-        mismatched["image_path"] = third["image_path"]
-    mismatched["is_counterfactual"] = True
-    mismatched["degradation_type"] = mismatch_type
-    mismatched["source_sample_id"] = sample["sample_id"]
-    mismatched["severity"] = "high"
-    return mismatched
-
-
 def create_augmented_sample(
     sample: dict[str, Any],
-    pool: list[dict[str, Any]],
     output_dir: str | Path,
     severity: str,
     degradation_type: str,
     rng: random.Random,
 ) -> dict[str, Any]:
-    if degradation_type in {"question_replacement", "image_replacement", "cross_sample_mismatch"}:
-        return construct_mismatch_sample(sample, pool, rng)
-
-    image = load_image(sample["image_path"])
+    source_image_path = sample.get("_source_image_path", sample["image_path"])
+    image = load_image(source_image_path)
     augmented = apply_degradation(image, degradation_type, severity, rng)
-    suffix = Path(sample["image_path"]).suffix or ".png"
-    out_path = Path(output_dir) / f"{sample['sample_id']}_{degradation_type}_{severity}{suffix}"
+    planned_sample_id = str(sample.get("sample_id") or "")
+    planned_image_path = sample.get("image_path")
+    if (
+        sample.get("is_counterfactual")
+        and sample.get("degradation_type") == degradation_type
+        and sample.get("severity") == severity
+        and planned_sample_id
+        and planned_image_path
+    ):
+        out_path = Path(planned_image_path)
+        result_sample_id = planned_sample_id
+    else:
+        suffix = Path(source_image_path).suffix or ".png"
+        out_path = Path(output_dir) / f"{sample['sample_id']}_{degradation_type}_{severity}{suffix}"
+        result_sample_id = f"{sample['sample_id']}__{degradation_type}_{severity}"
     saved_path = save_image(augmented, out_path)
-    return {
-        **sample,
-        "sample_id": f"{sample['sample_id']}__{degradation_type}_{severity}",
-        "image_path": saved_path,
-        "is_counterfactual": True,
-        "degradation_type": degradation_type,
-        "severity": severity,
-        "source_sample_id": sample["sample_id"],
-    }
+    if not Path(saved_path).exists():
+        raise RuntimeError(
+            "Augmented image was not written to disk: "
+            f"sample_id={sample.get('sample_id')} "
+            f"degradation_type={degradation_type} "
+            f"severity={severity} "
+            f"saved_path={saved_path}"
+        )
+    result = dict(sample)
+    result["sample_id"] = result_sample_id
+    result["image_path"] = saved_path
+    result["is_counterfactual"] = True
+    result["degradation_type"] = degradation_type
+    result["severity"] = severity
+    result["source_sample_id"] = sample.get("source_sample_id", sample["sample_id"])
+    return result

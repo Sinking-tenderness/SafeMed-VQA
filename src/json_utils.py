@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
+
+LOGGER = logging.getLogger(__name__)
+ABSTAIN_ANSWER_FALLBACK = "I cannot answer safely based on the available image evidence."
+MAX_FAILURE_PREVIEW_CHARS = 500
 
 REQUIRED_FIELDS = {
     "explanation",
@@ -17,7 +22,6 @@ ALLOWED_ABSTAIN_TYPES = {
     "none",
     "visual_insufficiency",
     "region_missing",
-    "question_mismatch",
     "high_risk_uncertainty",
 }
 ALLOWED_RISK_LEVELS = {"low", "medium", "high"}
@@ -89,10 +93,31 @@ def validate_output_schema(payload: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _repair_abstain_answer(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    repaired = dict(payload)
+    decision = str(repaired.get("decision", "")).strip().lower()
+    answer = repaired.get("answer")
+    if decision == "abstain" and (answer is None or not str(answer).strip()):
+        repaired["answer"] = ABSTAIN_ANSWER_FALLBACK
+        LOGGER.warning("Applied abstain-answer fallback repair to teacher output.")
+        return repaired, True
+    return repaired, False
+
+
 def normalize_output(payload: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(payload)
+    if not isinstance(payload, dict):
+        raise ValueError("Teacher output must be a JSON object.")
+    repaired_payload, _ = _repair_abstain_answer(payload)
+    missing = REQUIRED_FIELDS - set(repaired_payload)
+    if missing:
+        raise ValueError(f"missing_fields={sorted(missing)}")
+
+    normalized = dict(repaired_payload)
     normalized["explanation"] = str(normalized["explanation"]).strip()
-    normalized["raw_confidence"] = float(normalized["raw_confidence"])
+    try:
+        normalized["raw_confidence"] = float(normalized["raw_confidence"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("raw_confidence must be parseable as a number") from exc
     normalized["decision"] = str(normalized["decision"]).strip().lower()
     normalized["abstain_type"] = str(normalized["abstain_type"]).strip().lower()
     normalized["risk_level"] = str(normalized["risk_level"]).strip().lower()
@@ -101,6 +126,32 @@ def normalize_output(payload: dict[str, Any]) -> dict[str, Any]:
     if errors:
         raise ValueError("; ".join(errors))
     return normalized
+
+
+def build_output_failure_payload(text: str | None, error: Exception) -> dict[str, Any]:
+    preview = None
+    if text is not None:
+        preview = str(text).strip()[:MAX_FAILURE_PREVIEW_CHARS] or None
+    return {
+        "error_type": type(error).__name__,
+        "error": str(error),
+        "response_preview": preview,
+    }
+
+
+def build_exception_failure_payload(error: Exception) -> dict[str, Any]:
+    return {
+        "error_type": type(error).__name__,
+        "error": str(error),
+        "response_preview": None,
+    }
+
+
+def safe_parse_and_validate_json_output(text: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        return parse_and_validate_json_output(text), None
+    except Exception as exc:  # noqa: BLE001
+        return None, build_output_failure_payload(text, exc)
 
 
 def parse_and_validate_json_output(text: str) -> dict[str, Any]:
