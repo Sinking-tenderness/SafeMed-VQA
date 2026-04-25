@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
-import sys
+
 from tqdm import tqdm
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-    
-from src.dataset_utils import ROOT, ensure_dir, read_json, read_jsonl, write_json, write_jsonl
+from src.dataset_utils import ensure_dir, read_json, read_jsonl, write_json, write_jsonl
 from src.json_utils import build_exception_failure_payload, safe_parse_and_validate_json_output
 from src.model_utils import build_inference_messages, load_image, load_processor, load_student_model
 
@@ -238,6 +239,95 @@ def compute_teacher_field_consistency(
     return consistency
 
 
+def safe_divide(numerator: int | float, denominator: int | float) -> float | None:
+    return (numerator / denominator) if denominator else None
+
+
+def compute_teacher_decision_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    teacher_records = [
+        record
+        for record in records
+        if isinstance(record.get("teacher_output"), dict)
+        and record["teacher_output"].get("decision") in {"answer", "abstain"}
+    ]
+    valid_records = [
+        record
+        for record in teacher_records
+        if record.get("json_parse_success")
+        and isinstance(record.get("prediction"), dict)
+        and record["prediction"].get("decision") in {"answer", "abstain"}
+    ]
+
+    teacher_answer_count = sum(1 for record in teacher_records if record["teacher_output"].get("decision") == "answer")
+    teacher_abstain_count = sum(1 for record in teacher_records if record["teacher_output"].get("decision") == "abstain")
+    student_answer_count = sum(1 for record in valid_records if record["prediction"].get("decision") == "answer")
+    student_abstain_count = sum(1 for record in valid_records if record["prediction"].get("decision") == "abstain")
+    decision_match_count = sum(
+        1
+        for record in valid_records
+        if record["prediction"].get("decision") == record["teacher_output"].get("decision")
+    )
+    answer_when_teacher_answer_count = sum(
+        1
+        for record in valid_records
+        if record["teacher_output"].get("decision") == "answer" and record["prediction"].get("decision") == "answer"
+    )
+    abstain_when_teacher_answer_count = sum(
+        1
+        for record in valid_records
+        if record["teacher_output"].get("decision") == "answer" and record["prediction"].get("decision") == "abstain"
+    )
+    abstain_when_teacher_abstain_count = sum(
+        1
+        for record in valid_records
+        if record["teacher_output"].get("decision") == "abstain" and record["prediction"].get("decision") == "abstain"
+    )
+    answer_when_teacher_abstain_count = sum(
+        1
+        for record in valid_records
+        if record["teacher_output"].get("decision") == "abstain" and record["prediction"].get("decision") == "answer"
+    )
+    both_answer_records = [
+        record
+        for record in valid_records
+        if record["teacher_output"].get("decision") == "answer" and record["prediction"].get("decision") == "answer"
+    ]
+    exact_answer_match_count = sum(
+        1
+        for record in both_answer_records
+        if normalize_answer(record["prediction"].get("answer")) == normalize_answer(record["teacher_output"].get("answer"))
+    )
+
+    decision_match_rate = safe_divide(decision_match_count, len(valid_records))
+    return {
+        "teacher_decision_available_count": len(teacher_records),
+        "valid_student_output_count": len(valid_records),
+        "invalid_output_count": len(teacher_records) - len(valid_records),
+        "teacher_answer_count": teacher_answer_count,
+        "teacher_abstain_count": teacher_abstain_count,
+        "student_answer_count": student_answer_count,
+        "student_abstain_count": student_abstain_count,
+        "decision_match_count": decision_match_count,
+        "decision_match_rate": decision_match_rate,
+        "teacher_decision_match_rate": decision_match_rate,
+        "over_answer_count": answer_when_teacher_abstain_count,
+        "over_abstain_count": abstain_when_teacher_answer_count,
+        "answer_when_teacher_answer_count": answer_when_teacher_answer_count,
+        "abstain_when_teacher_answer_count": abstain_when_teacher_answer_count,
+        "abstain_when_teacher_abstain_count": abstain_when_teacher_abstain_count,
+        "answer_when_teacher_abstain_count": answer_when_teacher_abstain_count,
+        "correct_answer_when_teacher_answer": {
+            "available_count": len(both_answer_records),
+            "matched_count": exact_answer_match_count,
+            "match_rate": safe_divide(exact_answer_match_count, len(both_answer_records)),
+        },
+        "abstain_match_when_teacher_abstain": {
+            "count": abstain_when_teacher_abstain_count,
+            "rate": safe_divide(abstain_when_teacher_abstain_count, teacher_abstain_count),
+        },
+    }
+
+
 def summarize_results(
     *,
     model_mode: str,
@@ -258,10 +348,14 @@ def summarize_results(
 
     clean_vs_degraded: dict[str, dict[str, Any]] = {}
     grouped_decisions: dict[str, Counter[str]] = defaultdict(Counter)
+    grouped_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in parsed:
         prediction = record["prediction"]
         bucket = "clean" if record.get("degradation_type", "none") == "none" else "degraded"
         grouped_decisions[bucket][prediction.get("decision", "missing")] += 1
+    for record in results:
+        bucket = "clean" if record.get("degradation_type", "none") == "none" else "degraded"
+        grouped_records[bucket].append(record)
     for bucket in ["clean", "degraded"]:
         answer_count = grouped_decisions[bucket]["answer"]
         abstain_count = grouped_decisions[bucket]["abstain"]
@@ -272,6 +366,7 @@ def summarize_results(
             "abstain_count": abstain_count,
             "answer_ratio": (answer_count / parsed_bucket_total) if parsed_bucket_total else 0.0,
             "abstain_ratio": (abstain_count / parsed_bucket_total) if parsed_bucket_total else 0.0,
+            "teacher_decision_metrics": compute_teacher_decision_metrics(grouped_records[bucket]),
         }
 
     def summarize_group(field_name: str) -> dict[str, Any]:
@@ -286,6 +381,7 @@ def summarize_results(
                 "total_samples": len(group_records),
                 "parsed_samples": len(parsed_group),
                 "decision_distribution": dict(group_decisions),
+                "teacher_decision_metrics": compute_teacher_decision_metrics(group_records),
             }
         return group_stats
 
@@ -303,6 +399,8 @@ def summarize_results(
             "match_rate": (matched / len(available)) if available else None,
         }
 
+    teacher_decision_metrics = compute_teacher_decision_metrics(results)
+
     return {
         "model_mode": model_mode,
         "backend_requested": backend_requested,
@@ -319,6 +417,7 @@ def summarize_results(
         "degradation_type_stats": summarize_group("degradation_type"),
         "severity_stats": summarize_group("severity"),
         "teacher_field_consistency": consistency_summary,
+        **teacher_decision_metrics,
     }
 
 
@@ -377,7 +476,7 @@ def main() -> None:
     run_dir = ensure_dir(output_dir / f"{args.model_mode}_{backend_used}")
     results: list[dict[str, Any]] = []
     try:
-        for record in tqdm(test_records, desc=f"Evaluating {args.model_mode} ({backend_used})"):
+        for record in tqdm(test_records, desc=f"Evaluating {args.model_mode}_{backend_used}"):
             raw_text: str | None = None
             prediction: dict[str, Any] | None = None
             parse_error: dict[str, Any] | None = None
@@ -390,7 +489,9 @@ def main() -> None:
             teacher_output = record.get("teacher_output")
             result_record = {
                 "sample_id": record.get("sample_id"),
+                "clean_sample_id": record.get("clean_sample_id", record.get("sample_id")),
                 "image_path": record.get("image_path"),
+                "clean_image_path": record.get("clean_image_path", record.get("image_path")),
                 "question": record.get("question"),
                 "reference_answer": record.get("reference_answer", record.get("answer", "")),
                 "split": record.get("split"),

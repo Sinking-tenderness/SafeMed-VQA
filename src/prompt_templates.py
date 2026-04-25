@@ -34,7 +34,7 @@ def _base_user_instruction(sample: dict[str, Any]) -> str:
 
 def _sample_context(sample: dict[str, Any]) -> str:
     if not sample.get("is_counterfactual"):
-        return "Sample type: original training sample."
+        return "Sample type: original clean sample."
     degradation_type = sample.get("degradation_type", "unknown")
     severity = sample.get("severity", "unknown")
     return f"Sample type: counterfactual sample. degradation_type={degradation_type}; severity={severity}."
@@ -44,13 +44,15 @@ def build_teacher_messages(sample: dict[str, Any], image_url: str | dict[str, An
     if sample.get("degradation_type") in {"random_crop", "local_occlusion", "center_mask", "border_truncate"}:
         extra = (
             "This sample may hide clinically relevant regions. "
-            "If key anatomy is missing, abstain with region_missing."
+            "If key anatomy is missing, abstain with region_missing. "
+            'Do not guess when key visual evidence is missing.'
         )
     elif sample.get("is_counterfactual"):
         extra = (
             "This sample may be visually degraded. "
             "If the evidence remains sufficient, answering is allowed; otherwise abstain with visual_insufficiency "
-            "or high_risk_uncertainty."
+            "or high_risk_uncertainty. "
+            'Do not guess when key visual evidence is missing.'
         )
     else:
         extra = "For standard samples, answer when evidence is sufficient and remain concise."

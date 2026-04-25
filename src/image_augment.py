@@ -2,9 +2,47 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
+SUPPORTED_DEGRADATION_TYPES = [
+    "gaussian_blur",
+    "speckle_noise",
+    "resolution_drop",
+    "contrast_brightness_shift",
+    "random_crop",
+    "local_occlusion",
+    "center_mask",
+    "border_truncate",
+]
+
+DEGRADATION_TYPE_ALIASES = {
+    "gaussian_noise": "speckle_noise",
+    "brightness_shift": "contrast_brightness_shift",
+    "contrast_shift": "contrast_brightness_shift",
+    "low_resolution": "resolution_drop",
+    "occlusion": "local_occlusion",
+    "crop": "random_crop",
+    "border_truncation": "border_truncate",
+}
+
+SEVERITY_ALIASES = {
+    "mild": "low",
+    "severe": "high",
+}
+
+
+def normalize_severity(severity: str) -> str:
+    normalized = str(severity).strip().lower()
+    return SEVERITY_ALIASES.get(normalized, normalized)
+
+
+def normalize_degradation_type(degradation_type: str) -> str:
+    normalized = str(degradation_type).strip().lower()
+    return DEGRADATION_TYPE_ALIASES.get(normalized, normalized)
+
 
 def load_image(path: str | Path) -> Image.Image:
     return Image.open(path).convert("RGB")
@@ -113,22 +151,95 @@ def apply_degradation(
     severity: str,
     rng: random.Random,
 ) -> Image.Image:
+    degraded, _ = apply_degradation_with_params(image, degradation_type, severity, rng)
+    return degraded
+
+
+def apply_degradation_with_params(
+    image: Image.Image,
+    degradation_type: str,
+    severity: str,
+    rng: random.Random,
+) -> tuple[Image.Image, dict[str, Any]]:
+    degradation_type = normalize_degradation_type(degradation_type)
+    severity = normalize_severity(severity)
+    width, height = image.size
     if degradation_type == "gaussian_blur":
-        return apply_gaussian_blur(image, severity)
+        radius_map = {"low": 1.2, "medium": 2.4, "high": 4.0}
+        radius = radius_map.get(severity, 2.4)
+        return image.filter(ImageFilter.GaussianBlur(radius=radius)), {"radius": radius}
     if degradation_type == "speckle_noise":
-        return apply_speckle_noise(image, severity, rng)
+        sigma_map = {"low": 0.05, "medium": 0.12, "high": 0.2}
+        sigma = sigma_map.get(severity, 0.12)
+        noise_seed = rng.randint(0, 10_000_000)
+        array = np.asarray(image).astype(np.float32) / 255.0
+        noise = np.random.default_rng(noise_seed).normal(0.0, sigma, array.shape)
+        speckled = np.clip(array + array * noise, 0.0, 1.0)
+        return Image.fromarray((speckled * 255).astype(np.uint8)), {"sigma": sigma, "noise_seed": noise_seed}
     if degradation_type == "resolution_drop":
-        return apply_resolution_drop(image, severity)
+        scale_map = {"low": 0.8, "medium": 0.55, "high": 0.35}
+        scale = scale_map.get(severity, 0.55)
+        downsampled_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+        downsampled = image.resize(downsampled_size, Image.Resampling.BILINEAR)
+        restored = downsampled.resize((width, height), Image.Resampling.BICUBIC)
+        return restored, {"scale": scale, "downsampled_size": list(downsampled_size)}
     if degradation_type == "contrast_brightness_shift":
-        return apply_contrast_brightness_shift(image, severity, rng)
+        span_map = {"low": 0.12, "medium": 0.22, "high": 0.34}
+        span = span_map.get(severity, 0.22)
+        contrast_factor = 1.0 + rng.uniform(-span, span)
+        brightness_factor = 1.0 + rng.uniform(-span, span)
+        degraded = ImageEnhance.Contrast(image).enhance(contrast_factor)
+        degraded = ImageEnhance.Brightness(degraded).enhance(brightness_factor)
+        return degraded, {
+            "span": span,
+            "contrast_factor": contrast_factor,
+            "brightness_factor": brightness_factor,
+        }
     if degradation_type == "random_crop":
-        return apply_random_crop(image, severity, rng)
+        crop_ratio_map = {"low": 0.92, "medium": 0.8, "high": 0.65}
+        ratio = crop_ratio_map.get(severity, 0.8)
+        crop_w = max(1, int(width * ratio))
+        crop_h = max(1, int(height * ratio))
+        left = rng.randint(0, max(0, width - crop_w))
+        top = rng.randint(0, max(0, height - crop_h))
+        cropped = image.crop((left, top, left + crop_w, top + crop_h))
+        return cropped.resize((width, height), Image.Resampling.BICUBIC), {
+            "crop_ratio": ratio,
+            "crop_box": [left, top, left + crop_w, top + crop_h],
+            "resized_to": [width, height],
+        }
     if degradation_type == "local_occlusion":
-        return apply_occlusion(image, severity, rng)
+        coverage_map = {"low": 0.12, "medium": 0.22, "high": 0.35}
+        coverage = coverage_map.get(severity, 0.22)
+        occ_w = max(1, int(width * coverage))
+        occ_h = max(1, int(height * coverage))
+        left = rng.randint(0, max(0, width - occ_w))
+        top = rng.randint(0, max(0, height - occ_h))
+        occluded = image.copy()
+        occluded.paste(Image.new("RGB", (occ_w, occ_h), color=(0, 0, 0)), (left, top))
+        return occluded, {
+            "coverage": coverage,
+            "occlusion_box": [left, top, left + occ_w, top + occ_h],
+            "fill": [0, 0, 0],
+        }
     if degradation_type == "center_mask":
-        return apply_center_mask(image, severity)
+        ratio_map = {"low": 0.18, "medium": 0.3, "high": 0.42}
+        ratio = ratio_map.get(severity, 0.3)
+        mask_w = int(width * ratio)
+        mask_h = int(height * ratio)
+        left = (width - mask_w) // 2
+        top = (height - mask_h) // 2
+        masked = image.copy()
+        masked.paste(Image.new("RGB", (mask_w, mask_h), color=(0, 0, 0)), (left, top))
+        return masked, {"mask_ratio": ratio, "mask_box": [left, top, left + mask_w, top + mask_h], "fill": [0, 0, 0]}
     if degradation_type == "border_truncate":
-        return apply_border_truncate(image, severity)
+        ratio_map = {"low": 0.08, "medium": 0.15, "high": 0.22}
+        ratio = ratio_map.get(severity, 0.15)
+        left = int(width * ratio)
+        top = int(height * ratio)
+        cropped = image.crop((left, top, width, height))
+        padded = ImageOps.pad(cropped, (width, height), method=Image.Resampling.BICUBIC, color=(0, 0, 0))
+        return padded, {"truncate_ratio": ratio, "crop_box": [left, top, width, height], "padded_to": [width, height]}
     raise ValueError(f"Unsupported degradation_type: {degradation_type}")
 
 
