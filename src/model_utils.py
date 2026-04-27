@@ -335,13 +335,17 @@ def prepare_preference_texts(
     question: str,
     image_path: str | Path,
     completion_text: str,
+    max_length: int | None = None,
 ) -> tuple[dict[str, Any], int]:
     messages = build_inference_messages(question)
     prompt_text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     full_text = prompt_text + completion_text
     image = load_image(image_path)
-    full_inputs = processor(text=[full_text], images=[image], return_tensors="pt")
-    prompt_inputs = processor(text=[prompt_text], images=[image], return_tensors="pt")
+    processor_kwargs: dict[str, Any] = {"return_tensors": "pt"}
+    if max_length is not None:
+        processor_kwargs.update({"truncation": True, "max_length": max_length})
+    full_inputs = processor(text=[full_text], images=[image], **processor_kwargs)
+    prompt_inputs = processor(text=[prompt_text], images=[image], **processor_kwargs)
     prompt_len = int(prompt_inputs["attention_mask"].sum().item())
     return full_inputs, prompt_len
 
