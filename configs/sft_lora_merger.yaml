@@ -1,0 +1,55 @@
+seed: 42
+model:
+  model_name: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+  torch_dtype: bfloat16
+  use_flash_attention_2: false
+
+training:
+  output_dir: checkpoints/sft_qwen3vl8b_lora_merger_v1
+  run_name: sft_qwen3vl8b_lora_merger_v1
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  logging_steps: 10
+  save_steps: 500
+  eval_steps: 500
+  save_total_limit: 2
+  max_seq_length: 4096
+  gradient_checkpointing: true
+  bf16: true
+  report_to: []
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  require_visual_merger_targets: true
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+    - visual.merger.linear_fc1
+    - visual.merger.linear_fc2
+    - visual.deepstack_merger_list.0.linear_fc1
+    - visual.deepstack_merger_list.0.linear_fc2
+    - visual.deepstack_merger_list.1.linear_fc1
+    - visual.deepstack_merger_list.1.linear_fc2
+    - visual.deepstack_merger_list.2.linear_fc1
+    - visual.deepstack_merger_list.2.linear_fc2
+  target_module_regex:
+    - ".*language_model.*(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$"
+    - ".*visual\\.merger\\.(linear_fc1|linear_fc2)$"
+    - ".*visual\\.deepstack_merger_list\\.[0-9]+\\.(linear_fc1|linear_fc2)$"
+
+data:
+  train_jsonl: data/processed/train_safemed_pro.jsonl
+  eval_ratio: 0.05

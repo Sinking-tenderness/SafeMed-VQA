@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -105,11 +106,104 @@ def create_lora_config(config: dict[str, Any]):
     )
 
 
+def _is_linear_module(module: Any) -> bool:
+    return isinstance(module, torch.nn.Linear) or module.__class__.__name__ == "Linear"
+
+
+def _target_matches_module(module_name: str, target: str) -> bool:
+    return module_name == target or module_name.endswith(f".{target}") or module_name.endswith(target)
+
+
+def _categorize_lora_module(module_name: str) -> str:
+    if ".visual.blocks." in module_name or module_name.startswith("visual.blocks."):
+        return "visual_blocks"
+    if ".visual.deepstack_merger_list." in module_name or module_name.startswith("visual.deepstack_merger_list."):
+        return "visual_deepstack_merger"
+    if ".visual.merger." in module_name or module_name.startswith("visual.merger."):
+        return "visual_merger"
+    if ".language_model." in module_name or module_name.startswith("language_model."):
+        return "language_model"
+    return "other"
+
+
+def resolve_lora_target_modules(model: Any, lora_config: dict[str, Any]) -> list[str]:
+    target_regex = list(lora_config.get("target_module_regex") or [])
+    if not target_regex:
+        return list(lora_config.get("target_modules", []))
+
+    patterns = [re.compile(pattern) for pattern in target_regex]
+    matched: list[str] = []
+    for module_name, module in model.named_modules():
+        if not module_name or not _is_linear_module(module):
+            continue
+        if any(pattern.fullmatch(module_name) or pattern.match(module_name) for pattern in patterns):
+            matched.append(module_name)
+    return matched
+
+
+def inspect_lora_target_modules(
+    model: Any,
+    target_modules: list[str],
+    *,
+    require_visual_merger: bool = False,
+    max_print: int = 50,
+) -> dict[str, Any]:
+    matched: list[str] = []
+    for module_name, module in model.named_modules():
+        if not module_name or not _is_linear_module(module):
+            continue
+        if any(_target_matches_module(module_name, target) for target in target_modules):
+            matched.append(module_name)
+
+    category_counts = {
+        "language_model": 0,
+        "visual_merger": 0,
+        "visual_deepstack_merger": 0,
+        "visual_blocks": 0,
+        "other": 0,
+    }
+    for module_name in matched:
+        category_counts[_categorize_lora_module(module_name)] += 1
+
+    summary = {
+        "total_matched_modules": len(matched),
+        "language_matched_modules": category_counts["language_model"],
+        "visual_merger_matched_modules": category_counts["visual_merger"],
+        "visual_deepstack_merger_matched_modules": category_counts["visual_deepstack_merger"],
+        "visual_blocks_matched_modules": category_counts["visual_blocks"],
+        "other_matched_modules": category_counts["other"],
+        "matched_module_names": matched,
+    }
+    print(
+        "LoRA target module summary: "
+        f"total={summary['total_matched_modules']} "
+        f"language={summary['language_matched_modules']} "
+        f"visual_merger={summary['visual_merger_matched_modules']} "
+        f"visual_deepstack_merger={summary['visual_deepstack_merger_matched_modules']} "
+        f"visual_blocks={summary['visual_blocks_matched_modules']} "
+        f"other={summary['other_matched_modules']}"
+    )
+    print(f"First {min(max_print, len(matched))} matched LoRA target modules:")
+    for module_name in matched[:max_print]:
+        print(module_name)
+
+    if not matched:
+        raise RuntimeError("No LoRA target modules matched the model. Refusing to start training.")
+    if require_visual_merger and category_counts["visual_merger"] + category_counts["visual_deepstack_merger"] == 0:
+        raise RuntimeError("No visual merger/deepstack merger LoRA targets matched. Refusing to start training.")
+    return summary
+
+
 def maybe_apply_lora(model, lora_config: dict[str, Any]):
     _, _, get_peft_model = _require_peft()
     if hasattr(model, "peft_config") and getattr(model, "peft_config", None):
         return model
-    return get_peft_model(model, create_lora_config(lora_config))
+    resolved_config = dict(lora_config)
+    resolved_targets = resolve_lora_target_modules(model, resolved_config)
+    resolved_config["target_modules"] = resolved_targets
+    require_visual_merger = bool(resolved_config.get("require_visual_merger_targets", False))
+    inspect_lora_target_modules(model, resolved_targets, require_visual_merger=require_visual_merger)
+    return get_peft_model(model, create_lora_config(resolved_config))
 
 
 def load_image(image_path: str | Path) -> Image.Image:

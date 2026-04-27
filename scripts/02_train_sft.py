@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.dataset_utils import ROOT, read_jsonl
+from src.dataset_utils import read_jsonl
 from src.model_utils import (
     MedicalSFTDataCollator,
     load_processor,
@@ -22,6 +22,7 @@ from src.model_utils import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train SafeMed-VQA Pro++ student with LoRA SFT.")
     parser.add_argument("--config", type=str, default="configs/sft.yaml")
+    parser.add_argument("--max-train-samples", type=int, default=None)
     return parser.parse_args()
 
 
@@ -37,7 +38,10 @@ def main() -> None:
     train_cfg = config["training"]
     data_cfg = config["data"]
 
-    records = prepare_sft_records(read_jsonl(ROOT / data_cfg["train_jsonl"]))
+    records = read_jsonl(ROOT / data_cfg["train_jsonl"])
+    if args.max_train_samples is not None:
+        records = records[: args.max_train_samples]
+    records = prepare_sft_records(records)
     dataset = Dataset.from_list(records)
     eval_ratio = float(data_cfg.get("eval_ratio", 0.05))
     if eval_ratio > 0.0 and len(dataset) > 20:
@@ -76,6 +80,7 @@ def main() -> None:
         bf16=bool(train_cfg.get("bf16", True)),
         gradient_checkpointing=bool(train_cfg.get("gradient_checkpointing", True)),
         report_to=list(train_cfg.get("report_to", ["wandb"])),
+        run_name=train_cfg.get("run_name"),
         remove_unused_columns=False,
         dataset_text_field=None,
         dataset_kwargs={"skip_prepare_dataset": True},
