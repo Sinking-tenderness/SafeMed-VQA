@@ -1,0 +1,34 @@
+seed: 42
+
+model:
+  model_name: /root/autodl-tmp/models/Qwen3-VL-8B-Instruct
+  sft_adapter_path: checkpoints/sft_qwen3vl8b_lora_merger_v1
+  torch_dtype: bfloat16
+  use_flash_attention_2: false
+
+data:
+  train_jsonl: data/processed/dpo_safety_v2_pairs_train.jsonl
+  eval_jsonl: data/processed/dpo_safety_v2_pairs_val.jsonl
+
+training:
+  output_dir: checkpoints/dpo_qwen3vl8b_lora_merger_safety_v2
+  run_name: dpo_qwen3vl8b_lora_merger_safety_v2
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-6
+  weight_decay: 0.0
+  warmup_ratio: 0.05
+  logging_steps: 5
+  save_steps: 50
+  eval_steps: 50
+  save_total_limit: 3
+  max_seq_length: 3072
+  max_prompt_length: 2048
+  bf16: true
+  gradient_checkpointing: true
+  report_to: []
+
+dpo:
+  beta: 0.05

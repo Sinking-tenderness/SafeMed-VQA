@@ -31,6 +31,27 @@ FIELDS = [
     "clean_decision_match_rate",
     "degraded_decision_match_rate",
     "paired_boundary_success_rate",
+    "answer_content_accuracy_when_both_answer",
+    "effective_answer_accuracy_when_teacher_answer",
+    "yesno_accuracy",
+    "open_average_score",
+    "over_abstain_rate_when_teacher_answer",
+    "invalid_output_rate_when_teacher_answer",
+    "unstructured_teacher_decision_match_rate",
+    "unstructured_precise_answer_rate",
+    "unstructured_precise_abstain_rate",
+    "unstructured_over_answer_rate",
+    "unstructured_over_answer_content_accuracy",
+    "unstructured_over_answer_correct_count",
+    "unstructured_over_answer_partially_correct_count",
+    "unstructured_over_answer_wrong_count",
+    "unstructured_over_abstain_rate",
+    "unstructured_answer_content_accuracy_when_both_answer",
+    "unstructured_effective_answer_accuracy_when_teacher_answer",
+    "unstructured_paired_boundary_success_rate",
+    "unstructured_judge_success_count",
+    "unstructured_judge_failed_count",
+    "unstructured_judge_failed_rate",
 ]
 
 
@@ -156,6 +177,41 @@ def merge_precise_summary(row: dict[str, Any], summary: dict[str, Any]) -> None:
     row["paired_boundary_success_rate"] = summary.get("paired_boundary_success_rate")
 
 
+def merge_answer_correctness_summary(row: dict[str, Any], summary: dict[str, Any]) -> None:
+    row["answer_content_accuracy_when_both_answer"] = summary.get("answer_content_accuracy_when_both_answer")
+    row["effective_answer_accuracy_when_teacher_answer"] = summary.get(
+        "effective_answer_accuracy_when_teacher_answer"
+    )
+    row["yesno_accuracy"] = summary.get("yesno_accuracy")
+    row["open_average_score"] = summary.get("open_average_score")
+    row["over_abstain_rate_when_teacher_answer"] = summary.get("over_abstain_rate_when_teacher_answer")
+    row["invalid_output_rate_when_teacher_answer"] = summary.get("invalid_output_rate_when_teacher_answer")
+
+
+def merge_unstructured_teacher_labeled_summary(row: dict[str, Any], summary: dict[str, Any]) -> None:
+    row["unstructured_teacher_decision_match_rate"] = summary.get("teacher_decision_match_rate")
+    row["unstructured_precise_answer_rate"] = summary.get("precise_answer_rate")
+    row["unstructured_precise_abstain_rate"] = summary.get("precise_abstain_rate")
+    row["unstructured_over_answer_rate"] = summary.get("over_answer_rate")
+    row["unstructured_over_answer_content_accuracy"] = summary.get("over_answer_content_accuracy")
+    row["unstructured_over_answer_correct_count"] = summary.get("over_answer_correct_count")
+    row["unstructured_over_answer_partially_correct_count"] = summary.get(
+        "over_answer_partially_correct_count"
+    )
+    row["unstructured_over_answer_wrong_count"] = summary.get("over_answer_wrong_count")
+    row["unstructured_over_abstain_rate"] = summary.get("over_abstain_rate")
+    row["unstructured_answer_content_accuracy_when_both_answer"] = summary.get(
+        "answer_content_accuracy_when_both_answer"
+    )
+    row["unstructured_effective_answer_accuracy_when_teacher_answer"] = summary.get(
+        "effective_answer_accuracy_when_teacher_answer"
+    )
+    row["unstructured_paired_boundary_success_rate"] = summary.get("paired_boundary_success_rate")
+    row["unstructured_judge_success_count"] = summary.get("judge_success_count")
+    row["unstructured_judge_failed_count"] = summary.get("judge_failed_count")
+    row["unstructured_judge_failed_rate"] = summary.get("judge_failed_rate")
+
+
 def collect_rows(outputs_root: Path) -> list[dict[str, Any]]:
     rows: dict[tuple[str, str], dict[str, Any]] = {}
     patterns = [
@@ -163,6 +219,8 @@ def collect_rows(outputs_root: Path) -> list[dict[str, Any]]:
         "eval_models/*/open_answer_judge_summary.json",
         "eval_models_teacher_labeled/*/summary.json",
         "eval_models_teacher_labeled/*/precise_abstention_summary.json",
+        "eval_models_teacher_labeled/*/answer_correctness_summary.json",
+        "eval_models_teacher_labeled/*/unstructured_teacher_labeled_summary.json",
     ]
     for pattern in patterns:
         for path in sorted(outputs_root.glob(pattern)):
@@ -176,6 +234,10 @@ def collect_rows(outputs_root: Path) -> list[dict[str, Any]]:
                 merge_open_answer_summary(rows[key], payload)
             elif path.name == "precise_abstention_summary.json":
                 merge_precise_summary(rows[key], payload)
+            elif path.name == "answer_correctness_summary.json":
+                merge_answer_correctness_summary(rows[key], payload)
+            elif path.name == "unstructured_teacher_labeled_summary.json":
+                merge_unstructured_teacher_labeled_summary(rows[key], payload)
     return [rows[key] for key in sorted(rows)]
 
 
