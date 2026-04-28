@@ -360,9 +360,21 @@ def completion_logprob(model, batch: dict[str, Any], prompt_len: int) -> torch.T
     labels = batch["input_ids"][:, 1:]
     log_probs = torch.log_softmax(logits, dim=-1)
     token_log_probs = torch.gather(log_probs, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+
     positions = torch.arange(labels.shape[1], device=labels.device).unsqueeze(0)
     completion_mask = positions >= max(prompt_len - 1, 0)
-    if model.config.pad_token_id is not None:
-        completion_mask &= labels != model.config.pad_token_id
-    masked_log_probs = token_log_probs * completion_mask
+
+    # Prefer attention_mask for multimodal configs such as Qwen3-VL.
+    # Some VL configs do not expose config.pad_token_id.
+    attention_mask = batch.get("attention_mask")
+    if attention_mask is not None:
+        completion_mask &= attention_mask[:, 1:].bool()
+    else:
+        pad_id = getattr(getattr(model, "config", None), "pad_token_id", None)
+        if pad_id is None and hasattr(model, "base_model"):
+            pad_id = getattr(getattr(getattr(model, "base_model", None), "config", None), "pad_token_id", None)
+        if pad_id is not None:
+            completion_mask &= labels != pad_id
+
+    masked_log_probs = token_log_probs.masked_fill(~completion_mask, 0.0)
     return masked_log_probs.sum(dim=1)
